@@ -779,6 +779,85 @@ npu_copy_and_expand_eagle_inputs(
             out_new_token_indices, out_hidden_state_mapping};
 }
 
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
+npu_beam_search_group(const at::Tensor& log_probs,
+                      const at::Tensor& top_tokens,
+                      const at::Tensor& top_probs,
+                      const at::Tensor& sequence,
+                      int64_t current_step,
+                      int64_t top_k)
+{
+    constexpr int64_t MAX_REQUEST_NUM = 48;
+    const auto device = log_probs.device();
+
+    TORCH_CHECK(device.type() == c10::DeviceType::PrivateUse1,
+                "log_probs must be an NPU tensor, but got ", device);
+    TORCH_CHECK(top_tokens.device() == device && top_probs.device() == device &&
+                    sequence.device() == device,
+                "all beam_search_group inputs must be on the same NPU device");
+    TORCH_CHECK(log_probs.is_contiguous() && top_tokens.is_contiguous() &&
+                    top_probs.is_contiguous() && sequence.is_contiguous(),
+                "all beam_search_group inputs must be contiguous");
+    TORCH_CHECK(log_probs.scalar_type() == at::kFloat,
+                "log_probs must have dtype float32, but got ", log_probs.scalar_type());
+    TORCH_CHECK(top_probs.scalar_type() == at::kFloat,
+                "top_probs must have dtype float32, but got ", top_probs.scalar_type());
+    TORCH_CHECK(top_tokens.scalar_type() == at::kInt,
+                "top_tokens must have dtype int32, but got ", top_tokens.scalar_type());
+    TORCH_CHECK(sequence.scalar_type() == at::kInt,
+                "sequence must have dtype int32, but got ", sequence.scalar_type());
+    TORCH_CHECK(log_probs.dim() == 2 && log_probs.size(1) == 1,
+                "log_probs must have shape [request_num * beam_width, 1]");
+    TORCH_CHECK(top_tokens.dim() == 2, "top_tokens must be a 2D tensor");
+    TORCH_CHECK(top_probs.dim() == 2, "top_probs must be a 2D tensor");
+    TORCH_CHECK(sequence.dim() == 3, "sequence must be a 3D tensor");
+
+    const int64_t num_sequences = log_probs.size(0);
+    const int64_t beam_width = top_tokens.size(1);
+    TORCH_CHECK(beam_width > 0, "beam_width must be greater than zero");
+    TORCH_CHECK(num_sequences % beam_width == 0,
+                "log_probs.size(0) must be divisible by beam_width");
+    const int64_t request_num = num_sequences / beam_width;
+    TORCH_CHECK(request_num > 0 && request_num <= MAX_REQUEST_NUM,
+                "request_num must be in [1, ", MAX_REQUEST_NUM, "], but got ", request_num);
+    TORCH_CHECK(top_tokens.size(0) == num_sequences,
+                "top_tokens.size(0) must equal log_probs.size(0)");
+    TORCH_CHECK(top_probs.sizes() == top_tokens.sizes(),
+                "top_probs and top_tokens must have the same shape");
+    TORCH_CHECK(sequence.size(0) == request_num && sequence.size(1) == beam_width,
+                "sequence must have shape [request_num, beam_width, current_step + 1]");
+    TORCH_CHECK(current_step > 0,
+                "the vLLM Ascend integration supports beam_search_group in decode only");
+    TORCH_CHECK(sequence.size(2) == current_step + 1,
+                "sequence.size(2) must equal current_step + 1");
+    TORCH_CHECK(top_k == beam_width,
+                "the ReqLoop beam_search_group ABI requires top_k == beam_width, but got top_k=",
+                top_k, " and beam_width=", beam_width);
+
+    at::Tensor out_token_ids = at::zeros({request_num, top_k}, top_tokens.options());
+    at::Tensor out_token_index = at::zeros({request_num, top_k}, top_tokens.options());
+    at::Tensor out_log_probs = at::zeros({request_num, top_k}, log_probs.options());
+    at::Tensor out_beam_count_prefix_sums =
+        at::zeros({request_num, beam_width}, top_tokens.options());
+    at::Tensor out_sequence =
+        at::zeros({request_num, top_k, current_step + 1}, top_tokens.options());
+
+    EXEC_NPU_CMD(aclnnBeamSearchGroup,
+                 log_probs,
+                 top_tokens,
+                 top_probs,
+                 sequence,
+                 current_step,
+                 top_k,
+                 out_token_ids,
+                 out_token_index,
+                 out_log_probs,
+                 out_beam_count_prefix_sums,
+                 out_sequence);
+    return {out_token_ids, out_token_index, out_log_probs,
+            out_beam_count_prefix_sums, out_sequence};
+}
+
 at::Tensor npu_causal_conv1d_custom(
     const at::Tensor& output,
     const at::Tensor& x,
@@ -2519,6 +2598,16 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
         "Tensor out_is_masked_token_mask, Tensor out_new_token_indices, Tensor out_hidden_state_mapping)"
     );
     ops.impl("npu_copy_and_expand_eagle_inputs", torch::kPrivateUse1, &vllm_ascend::npu_copy_and_expand_eagle_inputs);
+
+    ops.def(
+        "npu_beam_search_group(Tensor log_probs, Tensor top_tokens, Tensor top_probs, "
+        "Tensor sequence, int current_step, int top_k) -> "
+        "(Tensor out_token_ids, Tensor out_token_index, Tensor out_log_probs, "
+        "Tensor out_beam_count_prefix_sums, Tensor out_sequence)"
+    );
+    ops.impl("npu_beam_search_group", torch::kPrivateUse1, &vllm_ascend::npu_beam_search_group);
+    // TODO(reqloop): Add a Meta implementation only if this eager post-forward
+    // sampling operator is later moved into ACLGraph capture.
     ops.def(
         "npu_causal_conv1d_custom(Tensor output, Tensor x, "
         "                         Tensor weight, "
