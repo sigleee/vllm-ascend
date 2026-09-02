@@ -20,6 +20,7 @@ add_ops_compile_options(
     OPTIONS --cce-auto-sync=on
             -Wno-deprecated-declarations
             -Werror
+            -DCATLASS_ARCH=2201
             -I${CANN_3RD_LIB_PATH}/catlass/include
             -I${CMAKE_CURRENT_LIST_DIR}/
 )
