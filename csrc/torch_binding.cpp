@@ -757,11 +757,12 @@ void npu_multi_layer_block_copy(
         return;
     }
 
+    int64_t num_layers = static_cast<int64_t>(key_caches.size());
     EXEC_NPU_CMD(aclnnMultiLayerBlockCopy,
                  key_caches,
                  value_caches,
                  block_mapping,
-                 static_cast<int64_t>(key_caches.size()));
+                 num_layers);
 }
 
 void device_print(c10::string_view msg)
