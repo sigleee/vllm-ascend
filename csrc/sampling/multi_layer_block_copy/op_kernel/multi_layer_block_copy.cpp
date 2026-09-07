@@ -25,17 +25,6 @@ namespace {
 constexpr uint32_t COPY_BUFFER_NUM = 2;
 constexpr uint32_t KEY_VALUE_COUNT = 2;
 
-template <typename T>
-__aicore__ inline __gm__ T* GetDynamicTensorAddress(uint32_t index,
-                                                    GM_ADDR tensor_list) {
-  __gm__ uint64_t* data_address =
-      reinterpret_cast<__gm__ uint64_t*>(tensor_list);
-  const uint64_t address_table_offset = *data_address;
-  __gm__ uint64_t* address_table =
-      data_address + (address_table_offset >> 3);
-  return reinterpret_cast<__gm__ T*>(*(address_table + index));
-}
-
 class MultiLayerBlockCopyKernel {
  public:
   __aicore__ inline MultiLayerBlockCopyKernel() {}
@@ -69,6 +58,20 @@ class MultiLayerBlockCopyKernel {
   }
 
  private:
+  __aicore__ inline __gm__ uint8_t* GetCacheAddress(
+      uint32_t layer_index, uint32_t key_value_index) {
+    __gm__ uint64_t* data_address =
+        reinterpret_cast<__gm__ uint64_t*>(key_cache_list_);
+    if (key_value_index != 0) {
+      data_address = reinterpret_cast<__gm__ uint64_t*>(value_cache_list_);
+    }
+    const uint64_t address_table_offset = *data_address;
+    __gm__ uint64_t* address_table =
+        data_address + (address_table_offset >> 3);
+    return reinterpret_cast<__gm__ uint8_t*>(
+        *(address_table + layer_index));
+  }
+
   __aicore__ inline void CopyTask(uint64_t task_index) {
     const uint32_t chunk_index =
         static_cast<uint32_t>(task_index % chunks_per_block_);
@@ -89,11 +92,8 @@ class MultiLayerBlockCopyKernel {
     SetFlag<HardEvent::S_MTE2>(scalar_to_mte2);
     WaitFlag<HardEvent::S_MTE2>(scalar_to_mte2);
 
-    GM_ADDR cache_list =
-        key_value_index == 0 ? key_cache_list_ : value_cache_list_;
     GlobalTensor<uint8_t> cache;
-    cache.SetGlobalBuffer(
-        GetDynamicTensorAddress<uint8_t>(layer_index, cache_list));
+    cache.SetGlobalBuffer(GetCacheAddress(layer_index, key_value_index));
 
     const uint64_t chunk_offset =
         static_cast<uint64_t>(chunk_index) * tile_bytes_;

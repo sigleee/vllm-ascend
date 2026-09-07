@@ -408,6 +408,10 @@ function(add_ops_src_copy)
         file(GLOB SRC_FILES ${SRC_COPY_SRC}/*)
     endif()
     list(FILTER SRC_FILES EXCLUDE REGEX "op_host")
+    # The copy target is guarded by a .done file, so track source contents
+    # explicitly to refresh staged kernel files after an incremental rebuild.
+    file(GLOB_RECURSE SRC_DEP_FILES CONFIGURE_DEPENDS ${SRC_COPY_SRC}/*)
+    list(FILTER SRC_DEP_FILES EXCLUDE REGEX "op_host")
 
     get_filename_component(PARENT_PTH "${SRC_COPY_SRC}" DIRECTORY)
     get_filename_component(CUR_NAME "${SRC_COPY_SRC}" NAME)
@@ -426,12 +430,14 @@ function(add_ops_src_copy)
                     COMMAND cp -rf ${SRC_FILES} ${SRC_COPY_DST}
                     COMMAND rm -rf ${SRC_COPY_DST}/op_kernel/
                     COMMAND touch ${_BUILD_FLAG}
+                    DEPENDS ${SRC_DEP_FILES}
             )
         else()
             add_custom_command(OUTPUT ${_BUILD_FLAG}
                     COMMAND mkdir -p ${SRC_COPY_DST}
                     COMMAND cp -rf ${SRC_FILES} ${SRC_COPY_DST}
                     COMMAND touch ${_BUILD_FLAG}
+                    DEPENDS ${SRC_DEP_FILES}
             )
         endif()
 
