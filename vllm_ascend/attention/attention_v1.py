@@ -130,14 +130,30 @@ class AscendAttentionBackend(AttentionBackend):
         kv_caches: list[torch.Tensor],
         src_to_dists: torch.Tensor,
     ) -> None:
+        if not kv_caches or src_to_dists.numel() == 0:
+            return
+
+        key_caches = [kv_cache[0] for kv_cache in kv_caches]
+        value_caches = [kv_cache[1] for kv_cache in kv_caches]
+        if key_caches[0].device.type == "npu":
+            block_mapping = src_to_dists.to(
+                device=key_caches[0].device,
+                dtype=torch.int32,
+                non_blocking=True,
+            ).contiguous()
+            torch.ops._C_ascend.npu_multi_layer_block_copy(
+                key_caches,
+                value_caches,
+                block_mapping,
+            )
+            return
+
+        # Keep the CPU path for backend unit tests and functional simulation.
         src_indices = src_to_dists[:, 0]
         dst_indices = src_to_dists[:, 1]
-
-        for kv_cache in kv_caches:
-            key_caches = kv_cache[0]
-            value_caches = kv_cache[1]
-            key_caches[dst_indices] = key_caches[src_indices]
-            value_caches[dst_indices] = value_caches[src_indices]
+        for key_cache, value_cache in zip(key_caches, value_caches):
+            key_cache[dst_indices] = key_cache[src_indices]
+            value_cache[dst_indices] = value_cache[src_indices]
 
     @staticmethod
     def get_supported_kernel_block_sizes() -> list[int]:

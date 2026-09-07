@@ -90,11 +90,17 @@ class TestAscendAttentionBackend(TestBase):
         self.assertTrue(torch.all(dst_kv_cache[1][3] == src_kv_cache[1][2]))
 
     def test_copy_blocks(self):
-        kv_caches = [torch.zeros((10, 20)), torch.zeros((10, 20))]
+        kv_caches = [torch.zeros((2, 10, 20)) for _ in range(2)]
+        kv_caches[0][0, 0] = 1
+        kv_caches[0][1, 0] = 2
+        kv_caches[1][0, 2] = 3
+        kv_caches[1][1, 2] = 4
         src_to_dists = torch.tensor([[0, 1], [2, 3]])
         AscendAttentionBackend.copy_blocks(kv_caches, src_to_dists)
-        self.assertTrue(torch.all(kv_caches[0][1] == kv_caches[0][0]))
-        self.assertTrue(torch.all(kv_caches[1][3] == kv_caches[1][2]))
+        self.assertTrue(torch.all(kv_caches[0][0, 1] == kv_caches[0][0, 0]))
+        self.assertTrue(torch.all(kv_caches[0][1, 1] == kv_caches[0][1, 0]))
+        self.assertTrue(torch.all(kv_caches[1][0, 3] == kv_caches[1][0, 2]))
+        self.assertTrue(torch.all(kv_caches[1][1, 3] == kv_caches[1][1, 2]))
 
 
 class TestAscendAttentionMetadataBuilder(TestBase):

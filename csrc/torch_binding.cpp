@@ -700,6 +700,70 @@ void transpose_kv_cache_by_block(
 
 }
 
+void npu_multi_layer_block_copy(
+    const at::TensorList& key_caches,
+    const at::TensorList& value_caches,
+    const at::Tensor& block_mapping)
+{
+    TORCH_CHECK(!key_caches.empty(),
+                "key_caches must contain at least one layer");
+    TORCH_CHECK(key_caches.size() == value_caches.size(),
+                "key_caches and value_caches must contain the same number of layers");
+
+    const at::Tensor& first_key_cache = key_caches[0];
+    const at::Tensor& first_value_cache = value_caches[0];
+    const c10::Device device = first_key_cache.device();
+    TORCH_CHECK(device.type() == c10::DeviceType::PrivateUse1,
+                "key_caches and value_caches must be NPU tensors");
+    TORCH_CHECK(first_key_cache.dim() == 4 && first_value_cache.dim() == 4,
+                "each key/value cache must be a 4D tensor");
+    TORCH_CHECK(first_key_cache.sizes() == first_value_cache.sizes(),
+                "key and value cache shapes must match");
+    TORCH_CHECK(first_key_cache.scalar_type() == first_value_cache.scalar_type(),
+                "key and value cache dtypes must match");
+    TORCH_CHECK(first_key_cache.size(0) > 0,
+                "the cache must contain at least one block");
+    TORCH_CHECK(first_key_cache.scalar_type() == at::kHalf ||
+                    first_key_cache.scalar_type() == at::kBFloat16 ||
+                    first_key_cache.scalar_type() == at::kChar,
+                "cache dtype must be float16, bfloat16, or int8");
+
+    for (size_t layer = 0; layer < key_caches.size(); ++layer) {
+        const at::Tensor& key_cache = key_caches[layer];
+        const at::Tensor& value_cache = value_caches[layer];
+        TORCH_CHECK(key_cache.device() == device && value_cache.device() == device,
+                    "all cache layers must be on the same NPU device");
+        TORCH_CHECK(key_cache.is_contiguous() && value_cache.is_contiguous(),
+                    "all cache layers must be contiguous");
+        TORCH_CHECK(key_cache.sizes() == first_key_cache.sizes() &&
+                        value_cache.sizes() == first_value_cache.sizes(),
+                    "all cache layers must have identical shapes");
+        TORCH_CHECK(key_cache.scalar_type() == first_key_cache.scalar_type() &&
+                        value_cache.scalar_type() == first_value_cache.scalar_type(),
+                    "all cache layers must have identical dtypes");
+    }
+
+    TORCH_CHECK(block_mapping.device() == device,
+                "block_mapping must be on the same NPU device as the caches");
+    TORCH_CHECK(block_mapping.is_contiguous(),
+                "block_mapping must be contiguous");
+    TORCH_CHECK(block_mapping.scalar_type() == at::kInt,
+                "block_mapping must have dtype int32");
+    TORCH_CHECK(block_mapping.dim() == 2 && block_mapping.size(1) == 2,
+                "block_mapping must have shape [num_pairs, 2]");
+    TORCH_CHECK(block_mapping.size(0) <= first_key_cache.size(0),
+                "block_mapping cannot contain more pairs than cache blocks");
+    if (block_mapping.size(0) == 0) {
+        return;
+    }
+
+    EXEC_NPU_CMD(aclnnMultiLayerBlockCopy,
+                 key_caches,
+                 value_caches,
+                 block_mapping,
+                 static_cast<int64_t>(key_caches.size()));
+}
+
 void device_print(c10::string_view msg)
 {
     auto payload = std::make_unique<DevicePrintPayload>();
@@ -2588,6 +2652,13 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
         "transpose_kv_cache_by_block(Tensor[] kCache, Tensor[] vCache, Tensor blockIDs, int blockSize, int headNum, int headDim, int splitNum, int layerNum) -> ()"
     );
     ops.impl("transpose_kv_cache_by_block", torch::kPrivateUse1, &vllm_ascend::transpose_kv_cache_by_block);
+
+    ops.def(
+        "npu_multi_layer_block_copy(Tensor(a!)[] key_caches, "
+        "Tensor(b!)[] value_caches, Tensor block_mapping) -> ()"
+    );
+    ops.impl("npu_multi_layer_block_copy", torch::kPrivateUse1,
+             &vllm_ascend::npu_multi_layer_block_copy);
 
     ops.def(
         "npu_copy_and_expand_eagle_inputs(Tensor target_token_ids, Tensor target_positions, "
