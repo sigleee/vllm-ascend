@@ -408,10 +408,6 @@ function(add_ops_src_copy)
         file(GLOB SRC_FILES ${SRC_COPY_SRC}/*)
     endif()
     list(FILTER SRC_FILES EXCLUDE REGEX "op_host")
-    # The copy target is guarded by a .done file, so track source contents
-    # explicitly to refresh staged kernel files after an incremental rebuild.
-    file(GLOB_RECURSE SRC_DEP_FILES CONFIGURE_DEPENDS ${SRC_COPY_SRC}/*)
-    list(FILTER SRC_DEP_FILES EXCLUDE REGEX "op_host")
 
     get_filename_component(PARENT_PTH "${SRC_COPY_SRC}" DIRECTORY)
     get_filename_component(CUR_NAME "${SRC_COPY_SRC}" NAME)
@@ -430,14 +426,12 @@ function(add_ops_src_copy)
                     COMMAND cp -rf ${SRC_FILES} ${SRC_COPY_DST}
                     COMMAND rm -rf ${SRC_COPY_DST}/op_kernel/
                     COMMAND touch ${_BUILD_FLAG}
-                    DEPENDS ${SRC_DEP_FILES}
             )
         else()
             add_custom_command(OUTPUT ${_BUILD_FLAG}
                     COMMAND mkdir -p ${SRC_COPY_DST}
                     COMMAND cp -rf ${SRC_FILES} ${SRC_COPY_DST}
                     COMMAND touch ${_BUILD_FLAG}
-                    DEPENDS ${SRC_DEP_FILES}
             )
         endif()
 
@@ -616,9 +610,6 @@ function(add_bin_compile_target)
         if (_compile_flag)
             set(_BUILD_COMMAND)
             set(_BUILD_FLAG ${GEN_OUT_DIR}/${OP_TARGET_NAME}_${op_index}.done)
-            file(GLOB_RECURSE OP_SOURCE_DEP_FILES CONFIGURE_DEPENDS
-                    ${${op_file}_dir}/*
-            )
             if (ENABLE_OPS_HOST OR ENABLE_HOST_TILING)
                 list(APPEND _BUILD_COMMAND export ASCEND_CUSTOM_OPP_PATH=${CUSTOM_DIR} &&)
             endif ()
@@ -634,8 +625,8 @@ function(add_bin_compile_target)
                     COMMAND ${_BUILD_COMMAND}
                     COMMAND touch ${_BUILD_FLAG}
                     WORKING_DIRECTORY ${GEN_OUT_DIR}
-                    DEPENDS ${bin_script} ${DYNAMIC_PY_FILE} ${OP_SOURCE_DEP_FILES}
             )
+
             add_custom_target(${OP_TARGET_NAME}_${op_index}
                 DEPENDS ${_BUILD_FLAG}
             )
@@ -653,10 +644,12 @@ function(add_bin_compile_target)
         set(BINARY_INFO_CONFIG_FILE ${BIN_OUT_DIR}/binary_info_config.json)
         set(RELOCATABLE_KERNEL_INFO_CONFIG_FILE ${BIN_OUT_DIR}/relocatable_kernel_info_config.json)
 
+        add_custom_command(OUTPUT ${BINARY_INFO_CONFIG_FILE}
+                COMMAND ${HI_PYTHON} ${ASCENDC_CMAKE_UTIL_DIR}/ascendc_ops_config.py -p ${BIN_OUT_DIR} -s ${BINARY_COMPUTE_UNIT}
+        )
+
         add_custom_target(${OPS_CONFIG_TARGET}
-                COMMAND ${HI_PYTHON} ${ASCENDC_CMAKE_UTIL_DIR}/ascendc_ops_config.py
-                        -p ${BIN_OUT_DIR} -s ${BINARY_COMPUTE_UNIT}
-                BYPRODUCTS ${BINARY_INFO_CONFIG_FILE} ${RELOCATABLE_KERNEL_INFO_CONFIG_FILE}
+                DEPENDS ${BINARY_INFO_CONFIG_FILE}
         )
 
         add_dependencies(ops_transformer_config ${OPS_CONFIG_TARGET})
