@@ -89,7 +89,7 @@ class MultiLayerBlockCopyKernel {
     SetFlag<HardEvent::S_MTE2>(scalar_to_mte2);
     WaitFlag<HardEvent::S_MTE2>(scalar_to_mte2);
 
-    const GM_ADDR cache_list =
+    GM_ADDR cache_list =
         key_value_index == 0 ? key_cache_list_ : value_cache_list_;
     GlobalTensor<uint8_t> cache;
     cache.SetGlobalBuffer(
