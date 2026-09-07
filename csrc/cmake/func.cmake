@@ -478,7 +478,6 @@ function(add_bin_compile_target)
     endforeach()
 
     set(_ops_target_list)
-    set(_binary_build_flags)
     set(compile_scripts)
     file(GLOB scripts_list ${GEN_OUT_DIR}/*.sh)
     list(APPEND compile_scripts ${scripts_list})
@@ -637,8 +636,6 @@ function(add_bin_compile_target)
                     WORKING_DIRECTORY ${GEN_OUT_DIR}
                     DEPENDS ${bin_script} ${DYNAMIC_PY_FILE} ${OP_SOURCE_DEP_FILES}
             )
-            list(APPEND _binary_build_flags ${_BUILD_FLAG})
-
             add_custom_target(${OP_TARGET_NAME}_${op_index}
                 DEPENDS ${_BUILD_FLAG}
             )
@@ -656,13 +653,10 @@ function(add_bin_compile_target)
         set(BINARY_INFO_CONFIG_FILE ${BIN_OUT_DIR}/binary_info_config.json)
         set(RELOCATABLE_KERNEL_INFO_CONFIG_FILE ${BIN_OUT_DIR}/relocatable_kernel_info_config.json)
 
-        add_custom_command(OUTPUT ${BINARY_INFO_CONFIG_FILE}
-                COMMAND ${HI_PYTHON} ${ASCENDC_CMAKE_UTIL_DIR}/ascendc_ops_config.py -p ${BIN_OUT_DIR} -s ${BINARY_COMPUTE_UNIT}
-                DEPENDS ${_binary_build_flags}
-        )
-
         add_custom_target(${OPS_CONFIG_TARGET}
-                DEPENDS ${BINARY_INFO_CONFIG_FILE}
+                COMMAND ${HI_PYTHON} ${ASCENDC_CMAKE_UTIL_DIR}/ascendc_ops_config.py
+                        -p ${BIN_OUT_DIR} -s ${BINARY_COMPUTE_UNIT}
+                BYPRODUCTS ${BINARY_INFO_CONFIG_FILE} ${RELOCATABLE_KERNEL_INFO_CONFIG_FILE}
         )
 
         add_dependencies(ops_transformer_config ${OPS_CONFIG_TARGET})
