@@ -9,10 +9,10 @@ enable_custom_op()
 
 
 BEAM_WIDTHS = [16, 32, 128, 256, 1024]
-NUM_LAYERS = 32
-BLOCK_SIZE = 4
-NUM_HEADS = 2
-HEAD_DIM = 16
+NUM_LAYERS = 28
+BLOCK_SIZE = 128
+NUM_HEADS = 8
+HEAD_DIM = 128
 CHILDREN_PER_PARENT = 4
 
 
@@ -26,7 +26,7 @@ def _cache_shape(num_blocks, layout):
 @pytest.mark.parametrize("layout", ["BSHD", "BHSD"])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 def test_multi_layer_block_copy_all_layers(beam_width, layout, dtype):
-    """Copy repeated parent blocks through one launch for a 32-layer cache."""
+    """Copy repeated parent blocks through one launch for a 28-layer cache."""
     torch.manual_seed(2026 + beam_width)
     num_blocks = beam_width * 2
     shape = _cache_shape(num_blocks, layout)
